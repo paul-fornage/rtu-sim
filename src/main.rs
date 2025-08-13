@@ -24,6 +24,8 @@ use crate::test_cases::{EarlyStopResult, sr_single_shared, sr_single_early_stop_
 pub const ENABLE_COIL_OFFSET: u16 = 8;
 pub const RUNNING_COIL_OFFSET: u16 = 9;
 pub const INDEX_HREG_OFFSET: u16 = 8;
+static CLIENT_CONNECTED: AtomicBool = AtomicBool::new(false);
+const DEFAULT_PORT: u16 = 502; // Default Modbus TCP port
 
 #[derive(Clone, Debug)]
 enum State {
@@ -37,12 +39,16 @@ enum State {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    let args: Vec<String> = std::env::args().collect();
+    let port = parse_port_arg(&args)?;
+    
     let ip = local_ip().unwrap();
     let ipv4 = match ip{
         IpAddr::V4(v4) => v4,
         IpAddr::V6(_) => panic!("Local IP says IPv6. This is not supported and highly unlikely for a local ip")
     };
-    let sock_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(ipv4, 502));
+    let sock_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(ipv4, port));
     env_logger::builder().filter_level(log::LevelFilter::Info).init();
     
     // Create shared state
@@ -65,7 +71,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-static CLIENT_CONNECTED: AtomicBool = AtomicBool::new(false);
+
+
+fn parse_port_arg(args: &[String]) -> Result<u16, Box<dyn std::error::Error>> {
+    for i in 0..args.len() {
+        if args[i] == "--port" || args[i] == "-p" {
+            if i + 1 >= args.len() {
+                return Err("Port argument requires a value".into());
+            }
+            let port_str = &args[i + 1];
+            let port: u16 = port_str.parse()
+                .map_err(|_| format!("Invalid port number: {}", port_str))?;
+            if port == 0 {
+                return Err("Port number must be greater than 0".into());
+            }
+            return Ok(port);
+        }
+    }
+    Ok(DEFAULT_PORT)
+}
+
 
 async fn server_context(socket_addr: SocketAddr, shared_state: SharedModbusState) -> anyhow::Result<()> {
     info!("Starting up local server on {socket_addr}");
