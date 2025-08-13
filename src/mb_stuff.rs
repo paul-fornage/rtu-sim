@@ -26,7 +26,13 @@ impl SharedModbusState {
     }
 
     pub fn read_coil(&self, addr: u16) -> bool {
-        self.coils.lock().unwrap().get(&addr).copied().unwrap_or(false)
+        let coils = self.coils.lock().unwrap();
+        if let Some(&value) = coils.get(&addr) {
+            value
+        } else {
+            warn!("Attempted to read from non-existent coil {addr}");
+            false
+        }
     }
 
     pub fn read_coils(&self, addr: u16, count: u16) -> Vec<bool> {
@@ -34,7 +40,12 @@ impl SharedModbusState {
         let mut result = Vec::with_capacity(count as usize);
         for i in 0..count {
             let coil_addr = addr + i;
-            result.push(coils.get(&coil_addr).copied().unwrap_or(false));
+            if let Some(&value) = coils.get(&coil_addr) {
+                result.push(value);
+            } else {
+                warn!("Attempted to read from non-existent coil {coil_addr}");
+                result.push(false);
+            }
         }
         result
     }
@@ -59,16 +70,17 @@ impl SharedModbusState {
         }
     }
 
-    pub fn read_holding_register(&self, addr: u16) -> u16 {
-        self.holding_registers.lock().unwrap().get(&addr).copied().unwrap_or(0)
-    }
-
     pub fn read_holding_registers(&self, addr: u16, count: u16) -> Vec<u16> {
         let registers = self.holding_registers.lock().unwrap();
         let mut result = Vec::with_capacity(count as usize);
         for i in 0..count {
             let reg_addr = addr + i;
-            result.push(registers.get(&reg_addr).copied().unwrap_or(0));
+            if let Some(&value) = registers.get(&reg_addr) {
+                result.push(value);
+            } else {
+                warn!("Attempted to read from non-existent holding register {reg_addr}");
+                result.push(0);
+            }
         }
         result
     }

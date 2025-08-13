@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_handle = std::thread::spawn(move || {
         // Use a runtime in this thread for the async parts
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(client_context(shared_state_clone))
+        rt.block_on(tui_thread(shared_state_clone))
     });
 
     // Wait for client to finish
@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn server_context(socket_addr: SocketAddr, shared_state: SharedModbusState) -> anyhow::Result<()> {
-    info!("Starting up internal server on {socket_addr}");
+    info!("Starting up local server on {socket_addr}");
     let listener = TcpListener::bind(socket_addr).await?;
     let server = Server::new(listener);
 
@@ -119,15 +119,11 @@ impl Debug for TestCases {
     }
 }
 
-async fn client_context(shared_state: SharedModbusState) {
+async fn tui_thread(shared_state: SharedModbusState) {
     let color_theme = ColorfulTheme::default();
 
     // Give the server some time for starting up
     tokio::time::sleep(Duration::from_secs(1)).await;
-
-    info!("Starting!");
-    let my_local_ip = local_ip().unwrap();
-    info!("Local server IP: {}:502", my_local_ip);
     
     let mut test_success;
     
