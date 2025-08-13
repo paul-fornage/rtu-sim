@@ -5,53 +5,14 @@ use log::warn;
 use tokio_modbus::{ExceptionCode, Request, Response};
 use crate::{ENABLE_COIL_OFFSET, INDEX_HREG_OFFSET, RUNNING_COIL_OFFSET};
 
-pub struct ExampleService {
+#[derive(Clone)]
+pub struct SharedModbusState {
     holding_registers: Arc<Mutex<HashMap<u16, u16>>>,
     coils: Arc<Mutex<HashMap<u16, bool>>>,
 }
 
-impl tokio_modbus::server::Service for ExampleService {
-    type Request = Request<'static>;
-    type Response = Response;
-    type Exception = ExceptionCode;
-    type Future = future::Ready<Result<Self::Response, Self::Exception>>;
-
-    fn call(&self, req: Self::Request) -> Self::Future {
-        let res = match req {
-            Request::ReadHoldingRegisters(addr, cnt) => {
-                register_read(&self.holding_registers.lock().unwrap(), addr, cnt)
-                    .map(Response::ReadHoldingRegisters)
-            }
-            Request::WriteMultipleRegisters(addr, values) => {
-                register_write(&mut self.holding_registers.lock().unwrap(), addr, &values)
-                    .map(|_| Response::WriteMultipleRegisters(addr, values.len() as u16))
-            }
-            Request::WriteSingleRegister(addr, value) => register_write(
-                &mut self.holding_registers.lock().unwrap(),
-                addr,
-                std::slice::from_ref(&value),
-            ).map(|_| Response::WriteSingleRegister(addr, value)),
-            Request::ReadCoils(addr, cnt) => {
-                coil_read(&mut self.coils.lock().unwrap(), addr, cnt).map(Response::ReadCoils)
-            }
-            Request::WriteMultipleCoils(addr, values) => {
-                coil_write(&mut self.coils.lock().unwrap(), addr, &values).map(|_| Response::WriteMultipleCoils(addr, values.len() as u16))
-            }
-            Request::WriteSingleCoil(addr, value) => {
-                coil_write(&mut self.coils.lock().unwrap(), addr, std::slice::from_ref(&value)).map(|_| Response::WriteSingleCoil(addr, value))
-            }
-            _ => {
-                println!("SERVER: Exception::IllegalFunction - Unimplemented function code in request: {req:?}");
-                Err(ExceptionCode::IllegalFunction)
-            }
-        };
-        future::ready(res)
-    }
-}
-
-impl ExampleService {
-    pub(crate) fn new() -> Self {
-        // Insert some test data as register values.
+impl SharedModbusState {
+    pub fn new() -> Self {
         let mut coils = HashMap::new();
         coils.insert(ENABLE_COIL_OFFSET, false);
         coils.insert(RUNNING_COIL_OFFSET, false);
@@ -63,83 +24,126 @@ impl ExampleService {
             holding_registers: Arc::new(Mutex::new(holding_registers)),
         }
     }
-}
 
-/// Helper function implementing reading registers from a HashMap.
-fn register_read(
-    registers: &HashMap<u16, u16>,
-    addr: u16,
-    cnt: u16,
-) -> Result<Vec<u16>, ExceptionCode> {
-    let mut response_values = vec![0; cnt.into()];
-    for i in 0..cnt {
-        let reg_addr = addr + i;
-        match registers.get(&reg_addr) {
-            Some(r) => response_values[i as usize] = *r,
-            None => {
-                warn!("Someone requested register {i} which does not exist. returning 0.");
-                response_values[i as usize] = 0;
+    pub fn read_coil(&self, addr: u16) -> bool {
+        self.coils.lock().unwrap().get(&addr).copied().unwrap_or(false)
+    }
+
+    pub fn read_coils(&self, addr: u16, count: u16) -> Vec<bool> {
+        let coils = self.coils.lock().unwrap();
+        let mut result = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let coil_addr = addr + i;
+            result.push(coils.get(&coil_addr).copied().unwrap_or(false));
+        }
+        result
+    }
+
+    pub fn write_coil(&self, addr: u16, value: bool) {
+        if let Some(coil) = self.coils.lock().unwrap().get_mut(&addr) {
+            *coil = value;
+        } else {
+            warn!("Attempted to write to non-existent coil {addr}");
+        }
+    }
+
+    pub fn write_coils(&self, addr: u16, values: &[bool]) {
+        let mut coils = self.coils.lock().unwrap();
+        for (i, &value) in values.iter().enumerate() {
+            let coil_addr = addr + i as u16;
+            if let Some(coil) = coils.get_mut(&coil_addr) {
+                *coil = value;
+            } else {
+                warn!("Attempted to write to non-existent coil {coil_addr}");
             }
         }
     }
 
-    Ok(response_values)
-}
+    pub fn read_holding_register(&self, addr: u16) -> u16 {
+        self.holding_registers.lock().unwrap().get(&addr).copied().unwrap_or(0)
+    }
 
-/// Write a holding register. Used by both the write single register
-/// and write multiple registers requests.
-fn register_write(
-    registers: &mut HashMap<u16, u16>,
-    addr: u16,
-    values: &[u16],
-) -> Result<(), ExceptionCode> {
-    for (i, value) in values.iter().enumerate() {
-        let reg_addr = addr + i as u16;
-        match registers.get_mut(&reg_addr) {
-            Some(r) => *r = *value,
-            None => {
-                warn!("Someone requested writing to reg {i} which does not exist. Disregarding write.");
-            }
+    pub fn read_holding_registers(&self, addr: u16, count: u16) -> Vec<u16> {
+        let registers = self.holding_registers.lock().unwrap();
+        let mut result = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let reg_addr = addr + i;
+            result.push(registers.get(&reg_addr).copied().unwrap_or(0));
+        }
+        result
+    }
+
+    pub fn write_holding_register(&self, addr: u16, value: u16) {
+        if let Some(register) = self.holding_registers.lock().unwrap().get_mut(&addr) {
+            *register = value;
+        } else {
+            warn!("Attempted to write to non-existent holding register {addr}");
         }
     }
 
-    Ok(())
-}
-
-fn coil_read(
-    coils: &HashMap<u16, bool>,
-    addr: u16,
-    cnt: u16,
-) -> Result<Vec<bool>, ExceptionCode> {
-    let mut response_values = vec![false; cnt.into()];
-    for i in 0..cnt {
-        let reg_addr = addr + i;
-        match coils.get(&reg_addr) {
-            Some(r) => response_values[i as usize] = *r,
-            None => {
-                warn!("Someone requested coil {i} which does not exist. returning false.");
-                response_values[i as usize] = false;
+    pub fn write_holding_registers(&self, addr: u16, values: &[u16]) {
+        let mut registers = self.holding_registers.lock().unwrap();
+        for (i, &value) in values.iter().enumerate() {
+            let reg_addr = addr + i as u16;
+            if let Some(register) = registers.get_mut(&reg_addr) {
+                *register = value;
+            } else {
+                warn!("Attempted to write to non-existent holding register {reg_addr}");
             }
         }
     }
-    Ok(response_values)
 }
 
-fn coil_write(
-    coils: &mut HashMap<u16, bool>,
-    addr: u16,
-    values: &[bool],
-) -> Result<(), ExceptionCode> {
-    for (i, value) in values.iter().enumerate() {
-        let reg_addr = addr + i as u16;
+pub struct ExampleService {
+    shared_state: SharedModbusState,
+}
 
-        match coils.get_mut(&reg_addr) {
-            Some(r) => *r = *value,
-            None => {
-                warn!("Someone requested writing to coil {i} which does not exist. Disregarding write.");
+impl tokio_modbus::server::Service for ExampleService {
+    type Request = Request<'static>;
+    type Response = Response;
+    type Exception = ExceptionCode;
+    type Future = future::Ready<Result<Self::Response, Self::Exception>>;
+
+    fn call(&self, req: Self::Request) -> Self::Future {
+        let res = match req {
+            Request::ReadHoldingRegisters(addr, cnt) => {
+                let values = self.shared_state.read_holding_registers(addr, cnt);
+                Ok(Response::ReadHoldingRegisters(values))
             }
+            Request::WriteMultipleRegisters(addr, values) => {
+                self.shared_state.write_holding_registers(addr, &values);
+                Ok(Response::WriteMultipleRegisters(addr, values.len() as u16))
+            }
+            Request::WriteSingleRegister(addr, value) => {
+                self.shared_state.write_holding_register(addr, value);
+                Ok(Response::WriteSingleRegister(addr, value))
+            }
+            Request::ReadCoils(addr, cnt) => {
+                let values = self.shared_state.read_coils(addr, cnt);
+                Ok(Response::ReadCoils(values))
+            }
+            Request::WriteMultipleCoils(addr, values) => {
+                self.shared_state.write_coils(addr, &values);
+                Ok(Response::WriteMultipleCoils(addr, values.len() as u16))
+            }
+            Request::WriteSingleCoil(addr, value) => {
+                self.shared_state.write_coil(addr, value);
+                Ok(Response::WriteSingleCoil(addr, value))
+            }
+            _ => {
+                println!("SERVER: Exception::IllegalFunction - Unimplemented function code in request: {req:?}");
+                Err(ExceptionCode::IllegalFunction)
+            }
+        };
+        future::ready(res)
+    }
+}
+
+impl ExampleService {
+
+    pub fn with_shared_state(shared_state: SharedModbusState) -> Self {
+        Self {
+            shared_state,
         }
     }
-    
-    Ok(())
 }
