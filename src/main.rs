@@ -9,6 +9,7 @@ use std::{
 };
 use std::fmt::{Debug, Formatter};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpListener;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use local_ip_address::local_ip;
@@ -64,6 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+static CLIENT_CONNECTED: AtomicBool = AtomicBool::new(false);
 
 async fn server_context(socket_addr: SocketAddr, shared_state: SharedModbusState) -> anyhow::Result<()> {
     info!("Starting up local server on {socket_addr}");
@@ -72,6 +74,7 @@ async fn server_context(socket_addr: SocketAddr, shared_state: SharedModbusState
 
     let on_connected = move |stream, socket_addr| {
         let shared_state = shared_state.clone();
+        CLIENT_CONNECTED.store(true, Ordering::Relaxed);
         let new_service = move |_socket_addr| {
             let state = shared_state.clone();
             Ok(Some(ExampleService::with_shared_state(state)))
@@ -124,10 +127,20 @@ async fn tui_thread(shared_state: SharedModbusState) {
 
     // Give the server some time for starting up
     tokio::time::sleep(Duration::from_secs(1)).await;
-    
+    if !CLIENT_CONNECTED.load(Ordering::Relaxed) {
+        warn!("No client connected yet. Waiting for connection...");
+        while(!CLIENT_CONNECTED.load(Ordering::Relaxed)) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    } else {
+        info!("Client is connected - ready to run tests");
+    }
     let mut test_success;
     
     loop {
+
+        
+
         test_success = true;
         let selections = &[
             "Execute SR",
