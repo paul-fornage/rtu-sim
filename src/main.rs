@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 use std::fmt::{Debug, Formatter};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use tokio::net::TcpListener;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
 use local_ip_address::local_ip;
@@ -51,14 +52,31 @@ enum State {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let socket_addr = "192.168.1.21:502".parse().unwrap();
-    env_logger::builder().filter_level(log::LevelFilter::Info).init();
-    tokio::select! {
-        _ = server_context(socket_addr) => unreachable!(),
-        _ = client_context(socket_addr) => info!("Exiting"),
-    }
+    let ip = local_ip().unwrap();
+    let ipv4 = match ip{
+        IpAddr::V4(v4) => v4,
+        IpAddr::V6(_) => panic!("IPv6 not supported")
+    };
+    let sock_addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(ipv4, 502));
+    // let host_socket_addr = "192.168.1.21:502".parse().unwrap();
+    // let client_socket_addr = "127.0.0.1:502".parse().unwrap();
+    env_logger::builder().filter_level(log::LevelFilter::Debug).init();
+    let server_handle = tokio::spawn(server_context(sock_addr));
+
+    // Run client (with blocking TUI) in a separate thread
+    let client_handle = std::thread::spawn(move || {
+        // Use a runtime in this thread for the async parts
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(client_context(sock_addr))
+    });
+
+    // Wait for client to finish
+    client_handle.join().unwrap();
+    // Optionally abort the server when client is done
+    server_handle.abort();
 
     Ok(())
+
 }
 async fn server_context(socket_addr: SocketAddr) -> anyhow::Result<()> {
     info!("Starting up internal server on {socket_addr}");

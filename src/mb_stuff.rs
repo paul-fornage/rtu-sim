@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::future;
 use std::sync::{Arc, Mutex};
+use log::warn;
 use tokio_modbus::{ExceptionCode, Request, Response};
 use crate::{ENABLE_COIL_OFFSET, INDEX_HREG_OFFSET, RUNNING_COIL_OFFSET};
 
@@ -73,11 +74,12 @@ fn register_read(
     let mut response_values = vec![0; cnt.into()];
     for i in 0..cnt {
         let reg_addr = addr + i;
-        if let Some(r) = registers.get(&reg_addr) {
-            response_values[i as usize] = *r;
-        } else {
-            println!("SERVER: Exception::IllegalDataAddress");
-            return Err(ExceptionCode::IllegalDataAddress);
+        match registers.get(&reg_addr) {
+            Some(r) => response_values[i as usize] = *r,
+            None => {
+                warn!("Someone requested register {i} which does not exist. returning 0.");
+                response_values[i as usize] = 0;
+            }
         }
     }
 
@@ -93,11 +95,11 @@ fn register_write(
 ) -> Result<(), ExceptionCode> {
     for (i, value) in values.iter().enumerate() {
         let reg_addr = addr + i as u16;
-        if let Some(r) = registers.get_mut(&reg_addr) {
-            *r = *value;
-        } else {
-            println!("SERVER: Exception::IllegalDataAddress");
-            return Err(ExceptionCode::IllegalDataAddress);
+        match registers.get_mut(&reg_addr) {
+            Some(r) => *r = *value,
+            None => {
+                warn!("Someone requested writing to reg {i} which does not exist. Disregarding write.");
+            }
         }
     }
 
@@ -112,8 +114,12 @@ fn coil_read(
     let mut response_values = vec![false; cnt.into()];
     for i in 0..cnt {
         let reg_addr = addr + i;
-        if let Some(r) = coils.get(&reg_addr) {
-            response_values[i as usize] = *r;
+        match coils.get(&reg_addr) {
+            Some(r) => response_values[i as usize] = *r,
+            None => {
+                warn!("Someone requested coil {i} which does not exist. returning false.");
+                response_values[i as usize] = false;
+            }
         }
     }
     Ok(response_values)
@@ -126,8 +132,12 @@ fn coil_write(
 ) -> Result<(), ExceptionCode> {
     for (i, value) in values.iter().enumerate() {
         let reg_addr = addr + i as u16;
-        if let Some(r) = coils.get_mut(&reg_addr) {
-            *r = *value;
+
+        match coils.get_mut(&reg_addr) {
+            Some(r) => *r = *value,
+            None => {
+                warn!("Someone requested writing to coil {i} which does not exist. Disregarding write.");
+            }
         }
     }
     
