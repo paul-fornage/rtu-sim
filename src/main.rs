@@ -29,12 +29,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let color_theme = ColorfulTheme::default();
 
-    let index: Ipv4Addr = Input::with_theme(&color_theme)
+    let arm_ip: Ipv4Addr = Input::with_theme(&color_theme)
         .with_prompt("Arm IP address: ")
         .interact_text()
         .unwrap();
     let port: u16 = if Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Use default port?")
+        .with_prompt("Use default port? (502)")
         .default(true)
         .interact()
         .unwrap()
@@ -47,11 +47,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap()
     };
     
-    let sock_addr = SocketAddr::V4(SocketAddrV4::new(index, port));
+    let sock_addr = SocketAddr::V4(SocketAddrV4::new(arm_ip, port));
     
     info!("Connecting to {sock_addr}...");
     let mut ctx = match tcp::connect(sock_addr).await {
-        Ok(ctx) => ctx,
+        Ok(ctx) => {
+            info!("Connected to {sock_addr}!");
+            ctx
+        }
         Err(err) => {
             error!("Failed to connect to {sock_addr}: {err}");
             return Ok(());
