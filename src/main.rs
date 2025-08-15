@@ -148,9 +148,10 @@ async fn tui_thread(shared_state: SharedModbusState) {
         while(!CLIENT_CONNECTED.load(Ordering::Relaxed)) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    } else {
-        info!("Client is connected - ready to run tests");
     }
+    
+    info!("Client is connected - ready to run tests");
+    
     let mut test_success;
     
     loop {
