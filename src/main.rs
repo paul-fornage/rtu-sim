@@ -27,15 +27,6 @@ pub const INDEX_HREG_OFFSET: u16 = 8;
 static CLIENT_CONNECTED: AtomicBool = AtomicBool::new(false);
 const DEFAULT_PORT: u16 = 502; // Default Modbus TCP port
 
-#[derive(Clone, Debug)]
-enum State {
-    StartSr(u16),
-    WaitForRunning(Instant),
-    WaitForFinish(Instant),
-    DeassertEnable,
-    EarlyStopCooldown(Instant),
-    DelayBetweenTests
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
