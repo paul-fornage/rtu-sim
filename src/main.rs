@@ -21,15 +21,6 @@ use crate::test_cases::{EarlyStopResult, sr_single_shared, sr_single_early_stop_
 
 const DEFAULT_PORT: u16 = 502; // Default Modbus TCP port
 
-#[derive(Clone, Debug)]
-enum State {
-    StartSr(u16),
-    WaitForRunning(Instant),
-    WaitForFinish(Instant),
-    DeassertEnable,
-    EarlyStopCooldown(Instant),
-    DelayBetweenTests
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
