@@ -26,7 +26,7 @@ const DEFAULT_PORT: u16 = 502; // Default Modbus TCP port
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     env_logger::builder()
-        .filter_level(log::LevelFilter::Trace)
+        .filter_level(log::LevelFilter::Info)
         .filter(Some("tokio_modbus"), log::LevelFilter::Info)
         .init();
 
