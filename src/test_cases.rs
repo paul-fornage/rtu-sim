@@ -1,10 +1,10 @@
 use crate::mb_helper::RUNNING_DISCRETE_OFFSET;
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use tokio::time::{self, Duration, error};
 use tokio_modbus::client::Context;
 use crate::mb_helper::{read_running_input, write_en_coil, write_index_hreg};
 
-pub async fn sr_single_shared(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
+pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
     write_index_hreg(ctx, idx).await?;
     write_en_coil(ctx, true).await?;
 
@@ -13,7 +13,7 @@ pub async fn sr_single_shared(ctx: &mut Context, idx: u16) -> anyhow::Result<()>
         subroutine #{idx} at modbus address {RUNNING_DISCRETE_OFFSET} (discrete input). \
         Waited {} ms", timeout_dur.as_millis());
     
-    match wait_for_running_shared(ctx, true, timeout_dur).await{
+    match wait_for_running(ctx, true, timeout_dur).await {
         Ok(WaitForRunningResult::Success) => {},
         Ok(WaitForRunningResult::Timeout) => { return Err(anyhow::anyhow!(err_msg)); },
         Err(e) => { return Err(e); }
@@ -27,7 +27,7 @@ pub async fn sr_single_shared(ctx: &mut Context, idx: u16) -> anyhow::Result<()>
         subroutine #{idx} at modbus address {RUNNING_DISCRETE_OFFSET} (discrete input). \
         Waited {} ms", timeout_dur.as_millis());
     
-    match wait_for_running_shared(ctx, false, timeout_dur).await{
+    match wait_for_running(ctx, false, timeout_dur).await{
         Ok(WaitForRunningResult::Success) => {},
         Ok(WaitForRunningResult::Timeout) => { return Err(anyhow::anyhow!(err_msg)); },
         Err(e) => { return Err(e); }
@@ -49,61 +49,149 @@ pub enum EarlyStopResult {
     TooLate,
 }
 
+pub async fn sr_single_early_stop(ctx: &mut Context, idx: u16, early_stop_duration: Duration) -> anyhow::Result<EarlyStopResult> {
+    write_index_hreg(ctx, idx).await?;
+    write_en_coil(ctx, true).await?;
+    
+    let end_time = time::Instant::now() + early_stop_duration;
 
-pub async fn sr_single_early_stop_shared(ctx: &mut Context, idx: u16, duration: Duration) -> anyhow::Result<EarlyStopResult> {
-    match time::timeout(duration, sr_single_shared(ctx, idx)).await {
-        Ok(Ok(())) => {
-            debug!("Subroutine #{} completed before the early stop could be initiated", idx);
-            Ok(EarlyStopResult::TooLate)
+    let running_timeout_dur = Duration::from_secs(1);
+    let err_msg = format!("Timeout waiting for arm to set `running` to true running \
+        subroutine #{idx} at modbus address {RUNNING_DISCRETE_OFFSET} (discrete input). \
+        Waited {} ms", running_timeout_dur.as_millis());
+    
+    if time::Instant::now() + running_timeout_dur < end_time {
+        debug!("Early stop time is after running assert timeout, so we can just wait for running assert");
+        match wait_for_running(ctx, true, running_timeout_dur).await {
+            Ok(WaitForRunningResult::Success) => {
+                debug!("Running asserted before timeout");
+            },
+            Ok(WaitForRunningResult::Timeout) => { 
+                debug!("Running not asserted before timeout");
+                return Err(anyhow::anyhow!(err_msg)); 
+            },
+            Err(e) => { return Err(e); }
         }
-        Ok(Err(e)) => {
-            write_en_coil(ctx, false).await?;
-            debug!("Subroutine #{} failed to complete before the early stop could be initiated: {}", idx, e);
-            Err(e)
-        }
-        Err(_) => {
-            write_en_coil(ctx, false).await?;
-            time::sleep(Duration::from_millis(1000)).await;
-            if read_running_input(ctx).await? {
-                let err_msg = format!("Arm still running after early stop on index: {idx}. \
-                    Stopped at {:?} ms and waited 1 second", duration);
-                debug!("{}", err_msg);
-                return Err(anyhow::anyhow!(err_msg));
-            }
-            Ok(EarlyStopResult::Success)
+    } else {
+        let timeout = end_time - time::Instant::now();
+        debug!("Early stop time is before running assert timeout, so we can just wait for the early stop");
+        match wait_for_running(ctx, true, timeout).await {
+            Ok(WaitForRunningResult::Success) => { 
+                debug!("Running asserted before early stop");
+            },
+            Ok(WaitForRunningResult::Timeout) => { 
+                // It's time to early stop
+                debug!("Running not asserted before early stop, commencing early stop");
+                return match execute_early_stop(ctx).await {
+                    Ok(_) => Ok(EarlyStopResult::Success),
+                    Err(e) => Err(e)
+                }
+            },
+            Err(e) => { return Err(e); }
         }
     }
+    
+
+    
+
+    debug!("Arm set to running, should be executing sub routine #{}. Waiting up to 60 seconds for motion to complete", idx);
+
+    let not_running_timeout_dur = Duration::from_secs(60);
+
+    let err_msg = format!("Timeout waiting for arm to set `running` to false running \
+        subroutine #{idx} at modbus address {RUNNING_DISCRETE_OFFSET} (discrete input). \
+        Waited {} ms", not_running_timeout_dur.as_millis());
+    
+    if time::Instant::now() + not_running_timeout_dur < end_time {
+        debug!("early stop time is after timeout, so we can just wait for the timeout");
+        match wait_for_running(ctx, false, not_running_timeout_dur).await{
+            Ok(WaitForRunningResult::Success) => {
+                debug!("Running deasserted before timeout");
+            },
+            Ok(WaitForRunningResult::Timeout) => { 
+                debug!("Running not deasserted before timeout");
+                return Err(anyhow::anyhow!(err_msg)); 
+            },
+            Err(e) => { return Err(e); }
+        }
+    } else {
+        debug!("early stop time is before deassertion timeout, so we can just wait for the early stop");
+        let timeout = end_time - time::Instant::now();
+        match wait_for_running(ctx, false, timeout).await {
+            Ok(WaitForRunningResult::Success) => {
+                debug!("Running deasserted before early stop");
+            },
+            Ok(WaitForRunningResult::Timeout) => {
+                debug!("Running not deasserted before early stop, commencing early stop");
+                return match execute_early_stop(ctx).await {
+                    Ok(_) => Ok(EarlyStopResult::Success),
+                    Err(e) => Err(e)
+                }
+            },
+            Err(e) => { return Err(e); }
+        }
+    }
+    
+
+    debug!("Motion complete");
+    write_en_coil(ctx, false).await?;
+    time::sleep(Duration::from_millis(100)).await;
+    if read_running_input(ctx).await? {
+        return Err(anyhow::anyhow!("Arm still running after motion complete. \
+            Enable coil was set to false, and then running was set true again. Likely arm is \
+            blindly running when enable is true, not only on rising edge"));
+    }
+    Ok(EarlyStopResult::TooLate)
 }
 
-enum WaitForRunningResult {
+/**
+ * To be called mid-operation to stop the arm early.
+ */
+async fn execute_early_stop(ctx: &mut Context) -> anyhow::Result<()> {
+    write_en_coil(ctx, false).await?;
+    match wait_for_running(ctx, false, Duration::from_secs(1)).await{
+        Ok(WaitForRunningResult::Success) => {
+            debug!("Arm early stopped success");
+            Ok(())
+        },
+        Ok(WaitForRunningResult::Timeout) => {
+            let err_msg = "Timeout waiting for arm to set `running` to false during early stop. \
+                Enable was set to false, but arm still running after 1 second grace period";
+            debug!("From `execute_early_stop`: {}", err_msg);
+            Err(anyhow::anyhow!(err_msg))
+        }
+        Err(e) => {
+            Err(e)
+        }
+    }
+} 
+
+
+pub enum WaitForRunningResult {
     Success,
     Timeout,
 }
-pub async fn wait_for_running_shared(
+pub async fn wait_for_running(
     ctx: &mut Context,
     target_state: bool,
     timeout: Duration
 ) -> anyhow::Result<WaitForRunningResult> {
-    match time::timeout(timeout, async {
-        loop {
-            match read_running_input(ctx).await {
-                Ok(actual_state) => {
-                    if actual_state == target_state {
-                        return Ok(WaitForRunningResult::Success)
-                    } else {
-                        time::sleep(Duration::from_millis(1)).await;
-                    }
-                    
-                },
-                Err(e) => return Err(e),
-            }
+    let start_time = time::Instant::now();
+    loop {
+        if start_time.elapsed() > timeout {
+            trace!("timeout waiting for running");
+            return Ok(WaitForRunningResult::Timeout)
         }
-    }).await {
-        Ok(r) => {
-            r
-        },
-        Err(_) => {
-            Ok(WaitForRunningResult::Timeout)
+        match read_running_input(ctx).await {
+            Ok(actual_state) => {
+                if actual_state == target_state {
+                    return Ok(WaitForRunningResult::Success)
+                } else {
+                    time::sleep(Duration::from_millis(10)).await;
+                }
+
+            },
+            Err(e) => return Err(e),
         }
     }
 }
