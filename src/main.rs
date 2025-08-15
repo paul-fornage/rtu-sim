@@ -25,7 +25,7 @@ const DEFAULT_PORT: u16 = 502; // Default Modbus TCP port
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    
+    env_logger::builder().filter_level(log::LevelFilter::Info).init();
 
     let color_theme = ColorfulTheme::default();
 
