@@ -1,5 +1,6 @@
 mod test_cases;
 mod mb_helper;
+mod cli;
 
 use log::{info, warn, error, debug};
 use std::{
@@ -8,11 +9,12 @@ use std::{
 };
 use std::fmt::{Debug, Formatter};
 use std::net::{Ipv4Addr, SocketAddrV4};
-
+use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 
 use tokio::time::Instant;
 use tokio_modbus::prelude::*;
+use crate::cli::Args;
 use crate::mb_helper::{write_en_coil, write_program_select_coil};
 use crate::test_cases::{EarlyStopResult, sr_single, sr_single_early_stop};
 
@@ -25,10 +27,14 @@ const DEFAULT_PORT: u16 = 502; // Default Modbus TCP port
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    let args = Args::parse();
+
     env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(args.log_level.unwrap_or(log::LevelFilter::Info))
         .filter(Some("tokio_modbus"), log::LevelFilter::Info)
         .init();
+    
+    warn!("using log level: {:?}", args.log_level);
 
     let color_theme = ColorfulTheme::default();
 
@@ -166,6 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             TestCases::SrUpTo(index) => {
                 info!("Arm should fully execute all sub routines from 0 up to {index} and then stop.");
                 for i in 0..=*index {
+                    debug!("Executing sub routine {i}.");
                     match sr_single(&mut ctx, i).await {
                         Ok(_) => {
                             info!("Subroutine {i}/{index} completed successfully.");

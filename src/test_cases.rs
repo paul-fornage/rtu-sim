@@ -13,16 +13,18 @@ pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
     let err_msg = format!("Timeout waiting for arm to set `running` to true running \
         subroutine #{idx} at modbus address {RUNNING_DISCRETE_OFFSET} (discrete input). \
         Waited {} ms", timeout_dur.as_millis());
-    
+    debug!("Waiting up to 1 second for arm to set running to true");
     match wait_for_running(ctx, true, timeout_dur).await {
-        Ok(WaitForRunningResult::Success) => {},
+        Ok(WaitForRunningResult::Success) => {
+            debug!("Arm acknowledge running");
+        },
         Ok(WaitForRunningResult::Timeout) => { return Err(anyhow::anyhow!(err_msg)); },
         Err(e) => { return Err(e); }
     }
 
     write_program_select_coil(ctx, false).await?;
 
-    debug!("Arm set to running, should be executing sub routine #{}. Waiting up to 60 seconds for motion to complete", idx);
+    debug!("Arm set running to true, should be executing sub routine #{}. Disabled program select and waiting up to 60 seconds for motion to complete", idx);
 
     let timeout_dur = Duration::from_secs(60);
     
@@ -31,13 +33,16 @@ pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
         Waited {} ms", timeout_dur.as_millis());
     
     match wait_for_running(ctx, false, timeout_dur).await{
-        Ok(WaitForRunningResult::Success) => {},
+        Ok(WaitForRunningResult::Success) => {
+            debug!("Arm set running to false before the 60 max subroutine execution time");
+        },
         Ok(WaitForRunningResult::Timeout) => { return Err(anyhow::anyhow!(err_msg)); },
         Err(e) => { return Err(e); }
     }
 
-    debug!("Motion complete");
+    debug!("Motion complete, arm set running back to false");
     write_en_coil(ctx, false).await?;
+    debug!("Enable set to false, waiting 100ms to ensure arm is not still running for good measure");
     time::sleep(Duration::from_millis(100)).await;
     if read_running_input(ctx).await? {
         return Err(anyhow::anyhow!("Arm still running after motion complete. \
