@@ -1,10 +1,11 @@
-use crate::mb_helper::RUNNING_DISCRETE_OFFSET;
+use crate::mb_helper::{write_program_select_coil, RUNNING_DISCRETE_OFFSET};
 use log::{debug, error, info, trace};
 use tokio::time::{self, Duration, error};
 use tokio_modbus::client::Context;
 use crate::mb_helper::{read_running_input, write_en_coil, write_index_hreg};
 
 pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
+    write_program_select_coil(ctx, true).await?;
     write_index_hreg(ctx, idx).await?;
     write_en_coil(ctx, true).await?;
 
@@ -18,6 +19,8 @@ pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
         Ok(WaitForRunningResult::Timeout) => { return Err(anyhow::anyhow!(err_msg)); },
         Err(e) => { return Err(e); }
     }
+
+    write_program_select_coil(ctx, false).await?;
 
     debug!("Arm set to running, should be executing sub routine #{}. Waiting up to 60 seconds for motion to complete", idx);
 
@@ -50,6 +53,7 @@ pub enum EarlyStopResult {
 }
 
 pub async fn sr_single_early_stop(ctx: &mut Context, idx: u16, early_stop_duration: Duration) -> anyhow::Result<EarlyStopResult> {
+    write_program_select_coil(ctx, true).await?;
     write_index_hreg(ctx, idx).await?;
     write_en_coil(ctx, true).await?;
     
@@ -90,6 +94,8 @@ pub async fn sr_single_early_stop(ctx: &mut Context, idx: u16, early_stop_durati
             Err(e) => { return Err(e); }
         }
     }
+
+    write_program_select_coil(ctx, false).await?;
     
 
     
@@ -148,6 +154,7 @@ pub async fn sr_single_early_stop(ctx: &mut Context, idx: u16, early_stop_durati
  * To be called mid-operation to stop the arm early.
  */
 async fn execute_early_stop(ctx: &mut Context) -> anyhow::Result<()> {
+    write_program_select_coil(ctx, false).await?;
     write_en_coil(ctx, false).await?;
     match wait_for_running(ctx, false, Duration::from_secs(1)).await{
         Ok(WaitForRunningResult::Success) => {

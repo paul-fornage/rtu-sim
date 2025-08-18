@@ -13,7 +13,7 @@ use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 
 use tokio::time::Instant;
 use tokio_modbus::prelude::*;
-use crate::mb_helper::write_en_coil;
+use crate::mb_helper::{write_en_coil, write_program_select_coil};
 use crate::test_cases::{EarlyStopResult, sr_single, sr_single_early_stop};
 
 
@@ -72,9 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut test_success;
 
     loop {
-
-
-
+        
         test_success = true;
         let selections = &[
             "Execute SR",
@@ -161,6 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         error!("Subroutine failed: {err}");
                         test_success = false;
                         write_en_coil(&mut ctx, false).await?;
+                        write_program_select_coil(&mut ctx, false).await?;
                     }
                 };
             },
@@ -175,6 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             error!("Subroutine failed: {err}");
                             test_success = false;
                             write_en_coil(&mut ctx, false).await?;
+                            write_program_select_coil(&mut ctx, false).await?;
                             break;
                         }
                     }
@@ -187,9 +187,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match sr_single(&mut ctx, 65535).await {
                     Ok(_) => info!("Subroutine 65535 completed successfully"),
                     Err(err) => {
-                        write_en_coil(&mut ctx, false).await?;
                         test_success = false;
-                        error!("Subroutine 65535 failed: {err}")
+                        error!("Subroutine 65535 failed: {err}");
+                        write_program_select_coil(&mut ctx, false).await?;
+                        write_en_coil(&mut ctx, false).await?;
                     }
                 }
             },
@@ -202,6 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         test_success = false;
                         error!("Subroutine {idx} failed stopping early: {err}");
                         write_en_coil(&mut ctx, false).await?;
+                        write_program_select_coil(&mut ctx, false).await?;
                     }
                 }
             },
@@ -215,6 +217,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             test_success = false;
                             error!("Subroutine {i} failed stopping early: {err}");
                             write_en_coil(&mut ctx, false).await?;
+                            write_program_select_coil(&mut ctx, false).await?;
                             break;
                         }
                     }
@@ -241,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             test_success = false;
                             error!("Subroutine {idx} failed stopping early at {:?}: {err}", delay);
                             write_en_coil(&mut ctx, false).await?;
+                            write_program_select_coil(&mut ctx, false).await?;
                             break;
                         }
                     }
