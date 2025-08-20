@@ -34,7 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(Some("tokio_modbus"), log::LevelFilter::Info)
         .init();
     
-    warn!("using log level: {:?}", args.log_level);
+    if let Some(log_level) = args.log_level {
+        warn!("Test using log level: {:?}", log_level);
+    }
 
     let color_theme = ColorfulTheme::default();
 
