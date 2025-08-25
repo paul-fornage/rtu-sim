@@ -7,6 +7,9 @@ use crate::mb_helper::{read_running_input, write_en_coil, write_index_hreg};
 pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
     write_program_select_coil(ctx, true).await?;
     write_index_hreg(ctx, idx).await?;
+    
+    time::sleep(Duration::from_millis(200)).await;
+    
     write_en_coil(ctx, true).await?;
 
     let timeout_dur = Duration::from_secs(1);
@@ -42,8 +45,8 @@ pub async fn sr_single(ctx: &mut Context, idx: u16) -> anyhow::Result<()> {
 
     debug!("Motion complete, arm set running back to false");
     write_en_coil(ctx, false).await?;
-    debug!("Enable set to false, waiting 100ms to ensure arm is not still running for good measure");
-    time::sleep(Duration::from_millis(100)).await;
+    debug!("Enable set to false, waiting 1s.");
+    time::sleep(Duration::from_millis(1000)).await;
     if read_running_input(ctx).await? {
         return Err(anyhow::anyhow!("Arm still running after motion complete. \
             Enable coil was set to false, and then running was set true again. Likely arm is \
@@ -60,6 +63,9 @@ pub enum EarlyStopResult {
 pub async fn sr_single_early_stop(ctx: &mut Context, idx: u16, early_stop_duration: Duration) -> anyhow::Result<EarlyStopResult> {
     write_program_select_coil(ctx, true).await?;
     write_index_hreg(ctx, idx).await?;
+
+    time::sleep(Duration::from_millis(200)).await;
+    
     write_en_coil(ctx, true).await?;
     
     let end_time = time::Instant::now() + early_stop_duration;
@@ -144,9 +150,9 @@ pub async fn sr_single_early_stop(ctx: &mut Context, idx: u16, early_stop_durati
     }
     
 
-    debug!("Motion complete");
+    debug!("Motion complete waiting 1000ms.");
     write_en_coil(ctx, false).await?;
-    time::sleep(Duration::from_millis(100)).await;
+    time::sleep(Duration::from_millis(1000)).await;
     if read_running_input(ctx).await? {
         return Err(anyhow::anyhow!("Arm still running after motion complete. \
             Enable coil was set to false, and then running was set true again. Likely arm is \
